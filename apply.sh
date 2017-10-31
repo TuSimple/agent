@@ -77,7 +77,6 @@ conf()
 
 start(){
     export PATH=${CATTLE_HOME}/bin:$PATH
-    check
     
     chmod +x $MAIN
     if [ "$CATTLE_PYPY" = "true" ] && which pypy >/dev/null; then
