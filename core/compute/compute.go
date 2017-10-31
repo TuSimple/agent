@@ -18,7 +18,20 @@ import (
 	dutils "github.com/rancher/agent/utilities/docker"
 	"github.com/rancher/agent/utilities/utils"
 	"golang.org/x/net/context"
+	"reflect"
+	"strconv"
 )
+
+var gpuReservation []float64
+var gpuFlag bool
+var gpuNeed int64
+var gpuRatio float64
+
+func InitGPUReservation() {
+	gpuFlag = false
+	gpuNeed = 0
+	gpuRatio = 1.0
+}
 
 func DoInstanceActivate(instance model.Instance, host model.Host, progress *progress.Progress, dockerClient *client.Client, infoData model.InfoData) error {
 	if utils.IsNoOp(instance.ProcessData) {
@@ -38,6 +51,23 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 	if str := constants.NameRegexCompiler.FindString(instanceName); str != "" {
 		// container name is valid
 		name = fmt.Sprintf("r-%s-%s", instanceName, parts[0])
+	}
+
+	if v, ok1 := host.Data["fields"]; ok1 {
+		if vv, ok2 := v.(map[string]interface{})["createLabels"]; ok2 {
+			if vvv, ok3 := vv.(map[string]interface{})["gpuReservation"]; ok3 {
+				if gpu, err := strconv.ParseInt(vvv.(string), 10, 64); err == nil {
+					if !gpuFlag {
+						gpuReservation = make([]float64, gpu)
+						for i:= 0; i < len(gpuReservation); i++ {
+							gpuReservation[i] = 1.0
+						}
+					}
+					gpuFlag = true
+					logrus.Infoln("TTTTTTTTTTTTTTTTTTT", reflect.TypeOf(host.Data["fields"]), host.Data["fields"].(map[string]interface{})["createLabels"].(map[string]interface{})["gpuReservation"], gpuReservation)
+				}
+			}
+		}
 	}
 
 	config := container.Config{
@@ -61,6 +91,18 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 	setupFieldsHostConfig(instance.Data.Fields, &hostConfig)
 
 	setupFieldsConfig(instance.Data.Fields, &config)
+	if gpuStr, ok := instance.Data.Fields.Labels["gpu"]; ok {
+		logrus.Infoln("IIITTTTTTTTTTTTTTTT", instance.Data.Fields.Labels["gpu"])
+		if gpu, err := strconv.ParseInt(gpuStr, 10, 64); err == nil {
+			gpuNeed = gpu
+		}
+	}
+	if ratioStr, ok := instance.Data.Fields.Labels["ratio"]; ok {
+		logrus.Infoln("RRRTTTTTTTTTTTTTTTT", instance.Data.Fields.Labels["ratio"])
+		if ratio, err := strconv.ParseFloat(ratioStr, 64); err == nil {
+			gpuRatio = ratio
+		}
+	}
 
 	setupPublishPorts(&hostConfig, instance)
 
@@ -88,6 +130,29 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 
 	setupNetworkingConfig(&networkConfig, instance)
 
+	if gpuNeed != 0 {
+		tempSlice := make([]int, gpuNeed)
+		temp := gpuRatio
+		h := 0
+		for i := 0; i < int(gpuNeed); i++ {
+			for j := 0; j < len(gpuReservation); j++ {
+				if temp <= gpuReservation[j] {
+					tempSlice[h] = j
+					h++
+					gpuReservation[j] -= temp
+					logrus.Infoln("GGGTTTTTTTTTTT", tempSlice)
+					break
+				}
+			}
+		}
+		tempStr := ""
+		for i := 0; i < int(gpuNeed) - 1; i++ {
+			tempStr = tempStr + strconv.Itoa(tempSlice[i]) + ","
+		}
+		tempStr = tempStr + strconv.Itoa(tempSlice[int(gpuNeed) - 1])
+		utils.AddLabel(&config, "gpu_card", tempStr)
+		logrus.Infoln("GGGTTTTTTTTTTT", gpuReservation, "$$$", tempStr)
+	}
 	setupDeviceOptions(&hostConfig, instance, infoData)
 
 	setupComputeResourceFields(&hostConfig, instance)
@@ -125,7 +190,10 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 		return errors.Wrap(startErr, constants.DoInstanceActivateError+"failed to start container")
 	}
 
+	gpuNeed = 0
+	gpuRatio = 1.0
 	logrus.Infof("rancher id [%v]: Container with docker id [%v] has been started", instance.ID, containerID)
+
 	return nil
 }
 
@@ -188,6 +256,24 @@ func DoInstanceDeactivate(instance model.Instance, client *client.Client, timeou
 	} else if !ok {
 		return fmt.Errorf("Failed to stop container %v", instance.UUID)
 	}
+
+	if tempStr, ok := container.Labels["gpu_card"]; ok {
+		logrus.Infoln("CCCTTTTTTTTTTTTTTTT", gpuReservation, tempStr)
+		tempSlice := strings.Split(tempStr, ",")
+		ratioStr, ok := container.Labels["ratio"]
+		var ratio float64
+		if !ok {
+			ratio = 1.0
+		} else {
+			ratio, _ = strconv.ParseFloat(ratioStr, 64)
+		}
+		for i := 0; i < len(tempSlice); i++ {
+			if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil {
+				gpuReservation[temp] += ratio
+			}
+		}
+	}
+
 	logrus.Infof("rancher id [%v]: Container with docker id [%v] has been deactivated", instance.ID, container.ID)
 	return nil
 }

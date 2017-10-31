@@ -422,6 +422,8 @@ func setupDeviceOptions(hostConfig *container.HostConfig, instance model.Instanc
 	blkioDeviceReadBps := []*blkiodev.ThrottleDevice{}
 	blkioDeviceWriteIOps := []*blkiodev.ThrottleDevice{}
 
+	logrus.Infoln("VVVTTTTTTTTTTT", deviceOptions)
+
 	for dev, options := range deviceOptions {
 		if dev == "DEFAULT_DISK" {
 			// ignore this error because if we can't find the device we just skip that device
