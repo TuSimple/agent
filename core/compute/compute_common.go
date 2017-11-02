@@ -24,6 +24,7 @@ import (
 	"github.com/rancher/agent/utilities/constants"
 	"github.com/rancher/agent/utilities/utils"
 	"golang.org/x/net/context"
+	"github.com/docker/docker/api/types/filters"
 )
 
 var (
@@ -134,11 +135,26 @@ func getDockerRoot(client *client.Client) string {
 	return dockerRoot
 }
 
-func setupVolumes(config *container.Config, instance model.Instance, hostConfig *container.HostConfig, client *client.Client, progress *progress.Progress) error {
+func setupVolumes(gpuNeed int, config *container.Config, instance model.Instance, hostConfig *container.HostConfig, client *client.Client, progress *progress.Progress) error {
 
 	volumes := instance.Data.Fields.DataVolumes
 	volumesMap := map[string]struct{}{}
 	binds := []string{}
+	if gpuNeed > 0 {
+		vols, err := client.VolumeList(context.Background(), filters.NewArgs())
+		if err == nil {
+			for _, vol := range vols.Volumes {
+				if vol.Driver == "nvidia-docker" {
+					tempStr := fmt.Sprintf("%s:/usr/local/nvidia:ro", vol.Name)
+					volumes = append(volumes, tempStr)
+					break
+				}
+			}
+		} else {
+			logrus.Infoln("CCCCCCCCCCCLLLLLLLLLLLLLL - docker", err)
+		}
+	}
+
 	if len(volumes) > 0 {
 		for _, volume := range volumes {
 			parts := strings.SplitN(volume, ":", 3)
@@ -171,6 +187,7 @@ func setupVolumes(config *container.Config, instance model.Instance, hostConfig 
 		config.Volumes = volumesMap
 		hostConfig.Binds = binds
 	}
+	logrus.Infoln("VVVVVVVVVVVVVLLLLLLLLLLLLLL", volumes)
 
 	containers := []string{}
 	if vfsList := instance.DataVolumesFromContainers; vfsList != nil {

@@ -297,7 +297,7 @@ func setupLinksNetwork(instance model.Instance, config *container.Config,
 }
 
 // this method convert fields data to fields in host configuration
-func setupFieldsHostConfig(fields model.InstanceFields, hostConfig *container.HostConfig) {
+func setupFieldsHostConfig(gpuNeed int, fields model.InstanceFields, hostConfig *container.HostConfig) {
 
 	hostConfig.ExtraHosts = fields.ExtraHosts
 
@@ -311,6 +311,18 @@ func setupFieldsHostConfig(fields model.InstanceFields, hostConfig *container.Ho
 
 	deviceMappings := []container.DeviceMapping{}
 	devices := fields.Devices
+
+	// if need gpu
+	if gpuNeed != 0 {
+		devices = append(devices, "/dev/nvidiactl:/dev/nvidiactl:rwm", "/dev/nvidia-uvm:/dev/nvidia-uvm:rwm")
+		for i := 0; i < gpuNeed; i++ {
+			tempStr := fmt.Sprintf("/dev/nvidia%v:/dev/nvidia%v:rwm", i, i)
+			devices = append(devices, tempStr)
+		}
+	}
+	// end
+
+	logrus.Infoln("DDDDDDDDDVVVVVVVVVVVV", devices)
 	for _, device := range devices {
 		parts := strings.Split(device, ":")
 		permission := "rwm"

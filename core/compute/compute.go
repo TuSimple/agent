@@ -88,9 +88,7 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 		utils.AddLabel(&config, constants.ContainerNameLabel, instanceName)
 	}
 
-	setupFieldsHostConfig(instance.Data.Fields, &hostConfig)
-
-	setupFieldsConfig(instance.Data.Fields, &config)
+	// start setting gpu
 	if gpuStr, ok := instance.Data.Fields.Labels["gpu"]; ok {
 		logrus.Infoln("IIITTTTTTTTTTTTTTTT", instance.Data.Fields.Labels["gpu"])
 		if gpu, err := strconv.ParseInt(gpuStr, 10, 64); err == nil {
@@ -103,32 +101,6 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 			gpuRatio = ratio
 		}
 	}
-
-	setupPublishPorts(&hostConfig, instance)
-
-	if err := setupDNSSearch(&hostConfig, instance); err != nil {
-		return errors.Wrap(err, constants.DoInstanceActivateError+"failed to set up DNS search")
-	}
-
-	setupLinks(&hostConfig, instance)
-
-	setupHostname(&config, instance)
-
-	setupPorts(&config, instance, &hostConfig)
-
-	if err := setupVolumes(&config, instance, &hostConfig, dockerClient, progress); err != nil {
-		return errors.Wrap(err, constants.DoInstanceActivateError+"failed to set up volumes")
-	}
-
-	if err := setupNetworking(instance, host, &config, &hostConfig, dockerClient, infoData); err != nil {
-		return errors.Wrap(err, constants.DoInstanceActivateError+"failed to set up networking")
-	}
-
-	setupProxy(instance, &config, getHostEntries())
-
-	setupCattleConfigURL(instance, &config)
-
-	setupNetworkingConfig(&networkConfig, instance)
 
 	if gpuNeed != 0 {
 		tempSlice := make([]int, gpuNeed)
@@ -153,6 +125,40 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 		utils.AddLabel(&config, "gpu_card", tempStr)
 		logrus.Infoln("GGGTTTTTTTTTTT", gpuReservation, "$$$", tempStr)
 	}
+	// gpu set up end
+
+	// add gpu device here
+	setupFieldsHostConfig(int(gpuNeed), instance.Data.Fields, &hostConfig)
+
+	setupFieldsConfig(instance.Data.Fields, &config)
+
+	setupPublishPorts(&hostConfig, instance)
+
+	if err := setupDNSSearch(&hostConfig, instance); err != nil {
+		return errors.Wrap(err, constants.DoInstanceActivateError+"failed to set up DNS search")
+	}
+
+	setupLinks(&hostConfig, instance)
+
+	setupHostname(&config, instance)
+
+	setupPorts(&config, instance, &hostConfig)
+
+	// add nvidia volume here
+	if err := setupVolumes(int(gpuNeed), &config, instance, &hostConfig, dockerClient, progress); err != nil {
+		return errors.Wrap(err, constants.DoInstanceActivateError+"failed to set up volumes")
+	}
+
+	if err := setupNetworking(instance, host, &config, &hostConfig, dockerClient, infoData); err != nil {
+		return errors.Wrap(err, constants.DoInstanceActivateError+"failed to set up networking")
+	}
+
+	setupProxy(instance, &config, getHostEntries())
+
+	setupCattleConfigURL(instance, &config)
+
+	setupNetworkingConfig(&networkConfig, instance)
+
 	setupDeviceOptions(&hostConfig, instance, infoData)
 
 	setupComputeResourceFields(&hostConfig, instance)
