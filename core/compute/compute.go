@@ -18,7 +18,6 @@ import (
 	dutils "github.com/rancher/agent/utilities/docker"
 	"github.com/rancher/agent/utilities/utils"
 	"golang.org/x/net/context"
-	"strconv"
 )
 
 var gpuDetection func(host model.Host, dockerClient *client.Client) int
