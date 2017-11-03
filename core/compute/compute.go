@@ -60,7 +60,7 @@ func initHostGPU(host model.Host, dockerClient *client.Client) error {
 										ratio, _ = strconv.ParseFloat(ratioStr, 64)
 									}
 									for i := 0; i < len(tempSlice); i++ {
-										if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil && gpuSupport.gpuReservation[temp] > ratio {
+										if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil && gpuSupport.gpuReservation[temp] >= ratio {
 											gpuSupport.gpuReservation[temp] -= ratio
 										}
 									}
