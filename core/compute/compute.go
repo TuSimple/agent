@@ -46,7 +46,7 @@ func initHostGPU(host model.Host, dockerClient *client.Client) error {
 						}
 
 						// check out existing containers that contains gpu resources
-						if containers, err := dockerClient.ContainerList(context.Background(), types.ContainerListOptions{All: true}); err != nil {
+						if containers, err := dockerClient.ContainerList(context.Background(), types.ContainerListOptions{All: true}); err == nil {
 							for _, con := range containers {
 								if tempStr, ok := con.Labels["gpu_card"]; ok {
 									logrus.Infoln("EEEEEEEEEEEXXXXXXXXX", tempStr)
@@ -67,7 +67,7 @@ func initHostGPU(host model.Host, dockerClient *client.Client) error {
 								}
 							}
 						}
-						
+
 						logrus.Infoln("TTTTTTTTTTTTTTTTTTAAAAAAAAA", reflect.TypeOf(host.Data["fields"]), host.Data["fields"].(map[string]interface{})["createLabels"].(map[string]interface{})["gpuReservation"], gpuSupport.gpuReservation)
 					}
 					gpuSupport.gpuFlag = true
