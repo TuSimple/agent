@@ -41,6 +41,10 @@ func getGpuAllocated(dockerClient *client.Client, gpu int) (gpuAllocated []float
 
 	if containers, err := dockerClient.ContainerList(context.Background(), types.ContainerListOptions{All: true}); err == nil {
 		for _, con := range containers {
+			if con.State != "running" {
+				continue
+			}
+
 			if tempStr, ok := con.Labels["gpu_card"]; ok {
 				logrus.Infoln("EEEEEEEEEEEXXXXXXXXX", tempStr)
 
