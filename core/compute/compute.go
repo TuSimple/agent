@@ -68,8 +68,8 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 	// add gpu support
 	if gpu := gpuDetection(host, dockerClient); gpu > 0 {
 		if gpuNeed, gpuRatio := getGpuNeeded(instance); gpuNeed > 0 {
-			gpuReservation := getGpuReservation(dockerClient, gpu)
-			gpuDispatched := dispatchGpu(gpuReservation, &config, gpuNeed, gpuRatio)
+			gpuAllocated := getGpuAllocated(dockerClient, gpu)
+			gpuDispatched := dispatchGpu(gpuAllocated, &config, gpuNeed, gpuRatio)
 			setGpuDeviceAndVolume(gpuDispatched, &instance, dockerClient)
 		}
 	}

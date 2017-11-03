@@ -12,6 +12,7 @@ import (
 	"github.com/rancher/agent/utilities/utils"
 	"fmt"
 	"github.com/docker/docker/api/types/filters"
+	"sort"
 )
 
 func generateGpuDetection() func(host model.Host, dockerClient *client.Client) int {
@@ -35,11 +36,8 @@ func generateGpuDetection() func(host model.Host, dockerClient *client.Client) i
 	}
 }
 
-func getGpuReservation(dockerClient *client.Client, gpu int) (gpuReservation []float64) {
-	gpuReservation = make([]float64, gpu)
-	for i:= 0; i < len(gpuReservation); i++ {
-		gpuReservation[i] = 1.0
-	}
+func getGpuAllocated(dockerClient *client.Client, gpu int) (gpuAllocated []float64) {
+	gpuAllocated = make([]float64, gpu)
 
 	if containers, err := dockerClient.ContainerList(context.Background(), types.ContainerListOptions{All: true}); err == nil {
 		for _, con := range containers {
@@ -55,8 +53,8 @@ func getGpuReservation(dockerClient *client.Client, gpu int) (gpuReservation []f
 					ratio, _ = strconv.ParseFloat(ratioStr, 64)
 				}
 				for i := 0; i < len(tempSlice); i++ {
-					if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil && gpuReservation[temp] >= ratio {
-						gpuReservation[temp] -= ratio
+					if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil {
+						gpuAllocated[temp] += ratio
 					}
 				}
 			}
@@ -86,27 +84,46 @@ func getGpuNeeded(instance model.Instance) (gpuNeed int, gpuRatio float64) {
 	return
 }
 
-func dispatchGpu(gpuReservation []float64, config *container.Config, gpuNeed int, gpuRatio float64) (gpuDispatched []int) {
+type Pair struct {
+	gpuUsed float64
+	index int
+}
+
+type Pairs []Pair
+
+func (pairs Pairs) Len() int {
+	return len(pairs)
+}
+
+func (pairs Pairs) Swap(i, j int)  {
+	pairs[i], pairs[j] = pairs[j], pairs[i]
+}
+
+func (pairs Pairs) Less(i, j int) bool {
+	return pairs[i].gpuUsed < pairs[j].gpuUsed
+}
+
+func dispatchGpu(gpuAllocated []float64, config *container.Config, gpuNeed int, gpuRatio float64) (gpuDispatched []int) {
 	if gpuNeed != 0 {
-		gpuDispatched = make([]int, gpuNeed)
-		temp := gpuRatio
-		for i := 0; i < int(gpuNeed); i++ {
-			for j := 0; j < len(gpuReservation); j++ {
-				if temp <= gpuReservation[j] {
-					gpuDispatched[i] = j
-					gpuReservation[j] -= temp
-					logrus.Infoln("GGGTTTTTTTTTTT", gpuDispatched)
-					break
-				}
-			}
+		tempPairs := make(Pairs, len(gpuAllocated))
+		for i := 0; i < len(tempPairs); i++ {
+			tempPairs[i] = Pair{gpuAllocated[i], i}
 		}
+		sort.Sort(tempPairs)
+
+		gpuDispatched = make([]int, gpuNeed)
+		for i := 0; i < gpuNeed; i++ {
+			gpuDispatched[i] = tempPairs[i].index
+			gpuAllocated[tempPairs[i].index] += gpuRatio
+		}
+
 		tempStr := ""
 		for i := 0; i < int(gpuNeed) - 1; i++ {
 			tempStr = tempStr + strconv.Itoa(gpuDispatched[i]) + ","
 		}
-		tempStr = tempStr + strconv.Itoa(gpuDispatched[int(gpuNeed) - 1])
+		tempStr = tempStr + strconv.Itoa(gpuDispatched[gpuNeed - 1])
 		utils.AddLabel(config, "gpu_card", tempStr)
-		logrus.Infoln("GGGTTTTTTTTTTT", gpuReservation, "$$$", tempStr)
+		logrus.Infoln("GGGTTTTTTTTTTT", gpuAllocated, "$$$", tempStr)
 	}
 
 	return gpuDispatched
