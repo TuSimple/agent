@@ -34,7 +34,7 @@ func InitGPUReservation() {
 	gpuSupport = GpuSupport{ gpuFlag:false }
 }
 
-func initHostGPU(host model.Host) error {
+func initHostGPU(host model.Host, dockerClient *client.Client) error {
 	if v, ok1 := host.Data["fields"]; ok1 {
 		if vv, ok2 := v.(map[string]interface{})["createLabels"]; ok2 {
 			if vvv, ok3 := vv.(map[string]interface{})["gpuReservation"]; ok3 {
@@ -44,6 +44,30 @@ func initHostGPU(host model.Host) error {
 						for i:= 0; i < len(gpuSupport.gpuReservation); i++ {
 							gpuSupport.gpuReservation[i] = 1.0
 						}
+
+						// check out existing containers that contains gpu resources
+						if containers, err := dockerClient.ContainerList(context.Background(), types.ContainerListOptions{All: true}); err != nil {
+							for _, con := range containers {
+								if tempStr, ok := con.Labels["gpu_card"]; ok {
+									logrus.Infoln("EEEEEEEEEEEXXXXXXXXX", tempStr)
+
+									tempSlice := strings.Split(tempStr, ",")
+									ratioStr, ok := con.Labels["ratio"]
+									var ratio float64
+									if !ok {
+										ratio = 1.0
+									} else {
+										ratio, _ = strconv.ParseFloat(ratioStr, 64)
+									}
+									for i := 0; i < len(tempSlice); i++ {
+										if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil && gpuSupport.gpuReservation[temp] > ratio {
+											gpuSupport.gpuReservation[temp] -= ratio
+										}
+									}
+								}
+							}
+						}
+						
 						logrus.Infoln("TTTTTTTTTTTTTTTTTTAAAAAAAAA", reflect.TypeOf(host.Data["fields"]), host.Data["fields"].(map[string]interface{})["createLabels"].(map[string]interface{})["gpuReservation"], gpuSupport.gpuReservation)
 					}
 					gpuSupport.gpuFlag = true
@@ -152,7 +176,7 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 		name = fmt.Sprintf("r-%s-%s", instanceName, parts[0])
 	}
 
-	if err = initHostGPU(host); err != nil {
+	if err = initHostGPU(host, dockerClient); err != nil {
 		logrus.Infoln("..................... - initGpu fail", err)
 	}
 
