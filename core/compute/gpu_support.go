@@ -116,7 +116,7 @@ func setGpuDeviceAndVolume(gpuDispatch []int, instance *model.Instance, client *
 	if gpuDispatch != nil {
 		instance.Data.Fields.Devices = append(instance.Data.Fields.Devices, "/dev/nvidiactl:/dev/nvidiactl:rwm", "/dev/nvidia-uvm:/dev/nvidia-uvm:rwm")
 		for i := 0; i < len(gpuDispatch); i++ {
-			tempStr := fmt.Sprintf("/dev/nvidia%v:/dev/nvidia%v:rwm", gpuDispatch[i], gpuDispatch[i])
+			tempStr := fmt.Sprintf("/dev/nvidia%v:/dev/nvidia%v:rwm", i, gpuDispatch[i])
 			instance.Data.Fields.Devices = append(instance.Data.Fields.Devices, tempStr)
 		}
 
