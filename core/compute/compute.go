@@ -18,141 +18,13 @@ import (
 	dutils "github.com/rancher/agent/utilities/docker"
 	"github.com/rancher/agent/utilities/utils"
 	"golang.org/x/net/context"
-	"reflect"
 	"strconv"
-	"github.com/docker/docker/api/types/filters"
 )
 
-type GpuSupport struct {
-	gpuReservation []float64
-	gpuFlag bool
-}
-
-var gpuSupport GpuSupport
+var gpuDetection func(host model.Host, dockerClient *client.Client) int
 
 func InitGPUReservation() {
-	gpuSupport = GpuSupport{ gpuFlag:false }
-}
-
-func initHostGPU(host model.Host, dockerClient *client.Client) error {
-	if v, ok1 := host.Data["fields"]; ok1 {
-		if vv, ok2 := v.(map[string]interface{})["createLabels"]; ok2 {
-			if vvv, ok3 := vv.(map[string]interface{})["gpuReservation"]; ok3 {
-				if gpu, err := strconv.ParseInt(vvv.(string), 10, 64); err == nil {
-					if !gpuSupport.gpuFlag {
-						gpuSupport.gpuReservation = make([]float64, gpu)
-						for i:= 0; i < len(gpuSupport.gpuReservation); i++ {
-							gpuSupport.gpuReservation[i] = 1.0
-						}
-
-						// check out existing containers that contains gpu resources
-						if containers, err := dockerClient.ContainerList(context.Background(), types.ContainerListOptions{All: true}); err == nil {
-							for _, con := range containers {
-								if tempStr, ok := con.Labels["gpu_card"]; ok {
-									logrus.Infoln("EEEEEEEEEEEXXXXXXXXX", tempStr)
-
-									tempSlice := strings.Split(tempStr, ",")
-									ratioStr, ok := con.Labels["ratio"]
-									var ratio float64
-									if !ok {
-										ratio = 1.0
-									} else {
-										ratio, _ = strconv.ParseFloat(ratioStr, 64)
-									}
-									for i := 0; i < len(tempSlice); i++ {
-										if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil && gpuSupport.gpuReservation[temp] >= ratio {
-											gpuSupport.gpuReservation[temp] -= ratio
-										}
-									}
-								}
-							}
-						}
-
-						logrus.Infoln("TTTTTTTTTTTTTTTTTTAAAAAAAAA", reflect.TypeOf(host.Data["fields"]), host.Data["fields"].(map[string]interface{})["createLabels"].(map[string]interface{})["gpuReservation"], gpuSupport.gpuReservation)
-					}
-					gpuSupport.gpuFlag = true
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func preDispatchGpu(config *container.Config, instance model.Instance, host model.Host, dockerClient *client.Client) (gpuDispatched []int, gpuNeed int64, gpuRatio float64) {
-	gpuRatio = 1.0
-
-	// calculate gpu resource needed
-	if gpuStr, ok := instance.Data.Fields.Labels["gpu"]; ok {
-		logrus.Infoln("IIITTTTTTTTTTTTTTTT", instance.Data.Fields.Labels["gpu"])
-		if gpu, err := strconv.ParseInt(gpuStr, 10, 64); err == nil {
-			gpuNeed = gpu
-		}
-	}
-	if ratioStr, ok := instance.Data.Fields.Labels["ratio"]; ok {
-		logrus.Infoln("RRRTTTTTTTTTTTTTTTT", instance.Data.Fields.Labels["ratio"])
-		if ratio, err := strconv.ParseFloat(ratioStr, 64); err == nil {
-			gpuRatio = ratio
-		}
-	}
-
-	if gpuNeed != 0 {
-		gpuDispatched = make([]int, gpuNeed)
-		temp := gpuRatio
-		for i := 0; i < int(gpuNeed); i++ {
-			for j := 0; j < len(gpuSupport.gpuReservation); j++ {
-				if temp <= gpuSupport.gpuReservation[j] {
-					gpuDispatched[i] = j
-					gpuSupport.gpuReservation[j] -= temp
-					logrus.Infoln("GGGTTTTTTTTTTT", gpuDispatched)
-					break
-				}
-			}
-		}
-		tempStr := ""
-		for i := 0; i < int(gpuNeed) - 1; i++ {
-			tempStr = tempStr + strconv.Itoa(gpuDispatched[i]) + ","
-		}
-		tempStr = tempStr + strconv.Itoa(gpuDispatched[int(gpuNeed) - 1])
-		utils.AddLabel(config, "gpu_card", tempStr)
-		logrus.Infoln("GGGTTTTTTTTTTT", gpuSupport.gpuReservation, "$$$", tempStr)
-
-		// restore gpu resource in case it fail
-		for i := 0; i < len(gpuDispatched); i++ {
-			gpuSupport.gpuReservation[gpuDispatched[i]] += temp
-		}
-	}
-
-	return gpuDispatched, gpuNeed, gpuRatio
-}
-
-func setGpuDeviceAndVolume(gpuDispatch []int, fields *model.InstanceFields, instance *model.Instance, client *client.Client) {
-	if gpuDispatch != nil {
-		fields.Devices = append(fields.Devices, "/dev/nvidiactl:/dev/nvidiactl:rwm", "/dev/nvidia-uvm:/dev/nvidia-uvm:rwm")
-		for i := 0; i < len(gpuDispatch); i++ {
-			tempStr := fmt.Sprintf("/dev/nvidia%v:/dev/nvidia%v:rwm", gpuDispatch[i], gpuDispatch[i])
-			fields.Devices = append(fields.Devices, tempStr)
-		}
-
-		vols, err := client.VolumeList(context.Background(), filters.NewArgs())
-		if err == nil {
-			for _, vol := range vols.Volumes {
-				if vol.Driver == "nvidia-docker" {
-					tempStr := fmt.Sprintf("%s:/usr/local/nvidia:ro", vol.Name)
-					instance.Data.Fields.DataVolumes = append(instance.Data.Fields.DataVolumes, tempStr)
-					break
-				}
-			}
-		} else {
-			logrus.Infoln("CCCCCCCCCCCLLLLLLLLLLLLLL - docker", err)
-		}
-	}
-}
-
-func postDispatchGpu(gpuDispatched []int, gpuRatio float64) {
-	for i := 0; i < len(gpuDispatched); i++ {
-		gpuSupport.gpuReservation[gpuDispatched[i]] -= gpuRatio
-	}
+	gpuDetection = generateGpuDetection()
 }
 
 func DoInstanceActivate(instance model.Instance, host model.Host, progress *progress.Progress, dockerClient *client.Client, infoData model.InfoData) error {
@@ -176,10 +48,6 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 		name = fmt.Sprintf("r-%s-%s", instanceName, parts[0])
 	}
 
-	if err = initHostGPU(host, dockerClient); err != nil {
-		logrus.Infoln("..................... - initGpu fail", err)
-	}
-
 	config := container.Config{
 		OpenStdin: true,
 	}
@@ -198,9 +66,14 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 		utils.AddLabel(&config, constants.ContainerNameLabel, instanceName)
 	}
 
-	gpuDispatched, gpuNeed, gpuRatio := preDispatchGpu(&config, instance, host, dockerClient)
-
-	setGpuDeviceAndVolume(gpuDispatched, &instance.Data.Fields, &instance, dockerClient)
+	// add gpu support
+	if gpu := gpuDetection(host, dockerClient); gpu > 0 {
+		if gpuNeed, gpuRatio := getGpuNeeded(instance); gpuNeed > 0 {
+			gpuReservation := getGpuReservation(dockerClient, gpu)
+			gpuDispatched := dispatchGpu(gpuReservation, &config, gpuNeed, gpuRatio)
+			setGpuDeviceAndVolume(gpuDispatched, &instance, dockerClient)
+		}
+	}
 
 	setupFieldsHostConfig(instance.Data.Fields, &hostConfig)
 
@@ -269,11 +142,6 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 		return errors.Wrap(startErr, constants.DoInstanceActivateError+"failed to start container")
 	}
 
-	// if nothing went wrong, dispatch gpu resource
-	if gpuNeed != 0 {
-		postDispatchGpu(gpuDispatched, gpuRatio)
-	}
-
 	logrus.Infof("rancher id [%v]: Container with docker id [%v] has been started", instance.ID, containerID)
 
 	return nil
@@ -337,24 +205,6 @@ func DoInstanceDeactivate(instance model.Instance, client *client.Client, timeou
 		return errors.Wrap(err, constants.DoInstanceDeactivateError+"failed to check whether container is stopped")
 	} else if !ok {
 		return fmt.Errorf("Failed to stop container %v", instance.UUID)
-	}
-
-	// release gpu
-	if tempStr, ok := container.Labels["gpu_card"]; ok {
-		logrus.Infoln("CCCTTTTTTTTTTTTTTTT", gpuSupport.gpuReservation, tempStr)
-		tempSlice := strings.Split(tempStr, ",")
-		ratioStr, ok := container.Labels["ratio"]
-		var ratio float64
-		if !ok {
-			ratio = 1.0
-		} else {
-			ratio, _ = strconv.ParseFloat(ratioStr, 64)
-		}
-		for i := 0; i < len(tempSlice); i++ {
-			if temp, err := strconv.ParseInt(tempSlice[i], 10, 64); err == nil {
-				gpuSupport.gpuReservation[temp] += ratio
-			}
-		}
 	}
 
 	logrus.Infof("rancher id [%v]: Container with docker id [%v] has been deactivated", instance.ID, container.ID)
