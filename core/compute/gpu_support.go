@@ -15,13 +15,16 @@ import (
 	"sort"
 )
 
+// generate gpu detection which return the amount of the gpu cards
 func generateGpuDetection() func(host model.Host, dockerClient *client.Client) int {
 	flag := false
 	gpu := 0
 
 	return func(host model.Host, dockerClient *client.Client) int {
+		// if flag were set, no need to detect again
 		if !flag {
 			if v, ok1 := host.Data["fields"]; ok1 {
+				// gpu label need to be added when hosts were added
 				if vv, ok2 := v.(map[string]interface{})["createLabels"]; ok2 {
 					if vvv, ok3 := vv.(map[string]interface{})["gpuReservation"]; ok3 {
 						if gpuDetected, err := strconv.ParseInt(vvv.(string), 10, 64); err == nil {
@@ -36,6 +39,7 @@ func generateGpuDetection() func(host model.Host, dockerClient *client.Client) i
 	}
 }
 
+// get gpu resources in use
 func getGpuAllocated(dockerClient *client.Client, gpu int) (gpuAllocated []float64) {
 	gpuAllocated = make([]float64, gpu)
 
@@ -46,8 +50,6 @@ func getGpuAllocated(dockerClient *client.Client, gpu int) (gpuAllocated []float
 			}
 
 			if tempStr, ok := con.Labels["gpu_card"]; ok {
-				logrus.Infoln("EEEEEEEEEEEXXXXXXXXX", tempStr)
-
 				tempSlice := strings.Split(tempStr, ",")
 				ratioStr, ok := con.Labels["ratio"]
 				var ratio float64
@@ -73,13 +75,11 @@ func getGpuNeeded(instance model.Instance) (gpuNeed int, gpuRatio float64) {
 
 	// calculate gpu resource needed
 	if gpuStr, ok := instance.Data.Fields.Labels["gpu"]; ok {
-		logrus.Infoln("IIITTTTTTTTTTTTTTTT", instance.Data.Fields.Labels["gpu"])
 		if gpu, err := strconv.ParseInt(gpuStr, 10, 64); err == nil {
 			gpuNeed = int(gpu)
 		}
 	}
 	if ratioStr, ok := instance.Data.Fields.Labels["ratio"]; ok {
-		logrus.Infoln("RRRTTTTTTTTTTTTTTTT", instance.Data.Fields.Labels["ratio"])
 		if ratio, err := strconv.ParseFloat(ratioStr, 64); err == nil {
 			gpuRatio = ratio
 		}
@@ -127,7 +127,7 @@ func dispatchGpu(gpuAllocated []float64, config *container.Config, gpuNeed int, 
 		}
 		tempStr = tempStr + strconv.Itoa(gpuDispatched[gpuNeed - 1])
 		utils.AddLabel(config, "gpu_card", tempStr)
-		logrus.Infoln("GGGTTTTTTTTTTT", gpuAllocated, "$$$", tempStr)
+		logrus.Infoln("GPU Resource: ", gpuAllocated, " , allocate: ", tempStr)
 	}
 
 	return gpuDispatched
@@ -151,7 +151,7 @@ func setGpuDeviceAndVolume(gpuDispatch []int, instance *model.Instance, client *
 				}
 			}
 		} else {
-			logrus.Infoln("CCCCCCCCCCCLLLLLLLLLLLLLL - docker", err)
+			logrus.Infoln("Cant't find gpu volume, maybe nvidia-docker hasn't been installed. ", err)
 		}
 	}
 }

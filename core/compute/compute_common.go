@@ -172,7 +172,7 @@ func setupVolumes(config *container.Config, instance model.Instance, hostConfig 
 		config.Volumes = volumesMap
 		hostConfig.Binds = binds
 	}
-	logrus.Infoln("VVVVVVVVVVVVVLLLLLLLLLLLLLL", volumes)
+	logrus.Infoln("Setting up volumes: ", volumes)
 
 	containers := []string{}
 	if vfsList := instance.DataVolumesFromContainers; vfsList != nil {

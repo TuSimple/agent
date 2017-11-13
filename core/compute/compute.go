@@ -18,16 +18,18 @@ import (
 	dutils "github.com/rancher/agent/utilities/docker"
 	"github.com/rancher/agent/utilities/utils"
 	"golang.org/x/net/context"
+	"sync"
 )
 
 var gpuDetection func(host model.Host, dockerClient *client.Client) int
+var gpuMu sync.Mutex
 
 func InitGPUReservation() {
 	gpuDetection = generateGpuDetection()
 }
 
 func DoInstanceActivate(instance model.Instance, host model.Host, progress *progress.Progress, dockerClient *client.Client, infoData model.InfoData) error {
-
+	start := time.Now()
 	if utils.IsNoOp(instance.ProcessData) {
 		return nil
 	}
@@ -68,9 +70,11 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 	// add gpu support
 	if gpu := gpuDetection(host, dockerClient); gpu > 0 {
 		if gpuNeed, gpuRatio := getGpuNeeded(instance); gpuNeed > 0 {
+			gpuMu.Lock()
 			gpuAllocated := getGpuAllocated(dockerClient, gpu)
 			gpuDispatched := dispatchGpu(gpuAllocated, &config, gpuNeed, gpuRatio)
 			setGpuDeviceAndVolume(gpuDispatched, &instance, dockerClient)
+			defer gpuMu.Unlock()
 		}
 	}
 
@@ -143,6 +147,9 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 
 	logrus.Infof("rancher id [%v]: Container with docker id [%v] has been started", instance.ID, containerID)
 
+	end := time.Now()
+	elapsed := end.Sub(start)
+	logrus.Infof("Activation time spent: %s", elapsed.String())
 	return nil
 }
 

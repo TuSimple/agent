@@ -312,7 +312,7 @@ func setupFieldsHostConfig(fields model.InstanceFields, hostConfig *container.Ho
 	deviceMappings := []container.DeviceMapping{}
 	devices := fields.Devices
 
-	logrus.Infoln("DDDDDDDDDVVVVVVVVVVVV", devices)
+	logrus.Infoln("Setting up devices: ", devices)
 	for _, device := range devices {
 		parts := strings.Split(device, ":")
 		permission := "rwm"
@@ -423,8 +423,6 @@ func setupDeviceOptions(hostConfig *container.HostConfig, instance model.Instanc
 	blkioDeviceWriteBps := []*blkiodev.ThrottleDevice{}
 	blkioDeviceReadBps := []*blkiodev.ThrottleDevice{}
 	blkioDeviceWriteIOps := []*blkiodev.ThrottleDevice{}
-
-	logrus.Infoln("VVVTTTTTTTTTTT", deviceOptions)
 
 	for dev, options := range deviceOptions {
 		if dev == "DEFAULT_DISK" {
