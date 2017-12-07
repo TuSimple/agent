@@ -16,27 +16,18 @@ import (
 )
 
 // generate gpu detection which return the amount of the gpu cards
-func generateGpuDetection() func(host model.Host, dockerClient *client.Client) int {
-	flag := false
-	gpu := 0
-
-	return func(host model.Host, dockerClient *client.Client) int {
-		// if flag were set, no need to detect again
-		if !flag {
-			if v, ok1 := host.Data["fields"]; ok1 {
-				// gpu label need to be added when hosts were added
-				if vv, ok2 := v.(map[string]interface{})["createLabels"]; ok2 {
-					if vvv, ok3 := vv.(map[string]interface{})["gpuReservation"]; ok3 {
-						if gpuDetected, err := strconv.ParseInt(vvv.(string), 10, 64); err == nil {
-							gpu = int(gpuDetected)
-						}
-					}
+func gpuDetection(host model.Host) (gpu int) {
+	if v, ok1 := host.Data["fields"]; ok1 {
+		if vv, ok2 := v.(map[string]interface{})["labels"]; ok2 {
+			if vvv, ok3 := vv.(map[string]interface{})["gpuReservation"]; ok3 {
+				if gpuDetected, err := strconv.ParseInt(vvv.(string), 10, 64); err == nil {
+					gpu = int(gpuDetected)
+					logrus.Infoln("GPU Reservation detected: ", gpu)
 				}
 			}
-			flag = true
 		}
-		return gpu
 	}
+	return
 }
 
 // get gpu resources in use
@@ -70,8 +61,9 @@ func getGpuAllocated(dockerClient *client.Client, gpu int) (gpuAllocated []float
 	return
 }
 
-func getGpuNeeded(instance model.Instance) (gpuNeed int, gpuRatio float64) {
+func getGpuNeeded(instance model.Instance) (gpuNeed int, gpuRatio float64, balanced bool) {
 	gpuRatio = 1.0
+	balanced = false
 
 	// calculate gpu resource needed
 	if gpuStr, ok := instance.Data.Fields.Labels["gpu"]; ok {
@@ -82,6 +74,11 @@ func getGpuNeeded(instance model.Instance) (gpuNeed int, gpuRatio float64) {
 	if ratioStr, ok := instance.Data.Fields.Labels["ratio"]; ok {
 		if ratio, err := strconv.ParseFloat(ratioStr, 64); err == nil {
 			gpuRatio = ratio
+		}
+	}
+	if strategyStr, ok := instance.Data.Fields.Labels["strategy"]; ok {
+		if strategyStr == "balanced" {
+			balanced = true
 		}
 	}
 
@@ -107,18 +104,37 @@ func (pairs Pairs) Less(i, j int) bool {
 	return pairs[i].gpuUsed < pairs[j].gpuUsed
 }
 
-func dispatchGpu(gpuAllocated []float64, config *container.Config, gpuNeed int, gpuRatio float64) (gpuDispatched []int) {
+func dispatchGpu(gpuAllocated []float64, config *container.Config, gpuNeed int, gpuRatio float64, balanced bool) (gpuDispatched []int) {
 	if gpuNeed != 0 {
 		tempPairs := make(Pairs, len(gpuAllocated))
 		for i := 0; i < len(tempPairs); i++ {
 			tempPairs[i] = Pair{gpuAllocated[i], i}
 		}
-		sort.Sort(tempPairs)
+		if balanced {
+			sort.Sort(tempPairs)
+		} else {
+			sort.Sort(sort.Reverse(tempPairs))
+		}
 
-		gpuDispatched = make([]int, gpuNeed)
-		for i := 0; i < gpuNeed; i++ {
-			gpuDispatched[i] = tempPairs[i].index
-			gpuAllocated[tempPairs[i].index] += gpuRatio
+		for _, pair := range tempPairs {
+			if len(gpuDispatched) >= gpuNeed {
+				break
+			}
+
+			if 10 - pair.gpuUsed >= gpuRatio {
+				gpuDispatched = append(gpuDispatched, pair.index)
+				gpuAllocated[pair.index] += gpuRatio
+			}
+		}
+
+		// if not satisfied, recover gpuAllocated and return nil
+		if len(gpuDispatched) != gpuNeed {
+			for _, i := range gpuDispatched {
+				gpuAllocated[i] -= gpuRatio
+			}
+			logrus.Errorln("GPU Distribution failed. Current Allocated: ", gpuAllocated)
+			gpuDispatched = nil
+			return nil
 		}
 
 		tempStr := ""
@@ -137,18 +153,21 @@ func setGpuDeviceAndVolume(gpuDispatch []int, instance *model.Instance, client *
 	if gpuDispatch != nil {
 		instance.Data.Fields.Devices = append(instance.Data.Fields.Devices, "/dev/nvidiactl:/dev/nvidiactl:rwm", "/dev/nvidia-uvm:/dev/nvidia-uvm:rwm")
 		for i := 0; i < len(gpuDispatch); i++ {
-			tempStr := fmt.Sprintf("/dev/nvidia%v:/dev/nvidia%v:rwm", i, gpuDispatch[i])
+			tempStr := fmt.Sprintf("/dev/nvidia%v:/dev/nvidia%v:rwm", gpuDispatch[i], i)
 			instance.Data.Fields.Devices = append(instance.Data.Fields.Devices, tempStr)
 		}
 
 		vols, err := client.VolumeList(context.Background(), filters.NewArgs())
 		if err == nil {
+			tempStr := ""
 			for _, vol := range vols.Volumes {
 				if vol.Driver == "nvidia-docker" {
-					tempStr := fmt.Sprintf("%s:/usr/local/nvidia:ro", vol.Name)
-					instance.Data.Fields.DataVolumes = append(instance.Data.Fields.DataVolumes, tempStr)
-					break
+					tempStr = fmt.Sprintf("%s:/usr/local/nvidia:ro", vol.Name)
 				}
+			}
+
+			if tempStr != "" {
+				instance.Data.Fields.DataVolumes = append(instance.Data.Fields.DataVolumes, tempStr)
 			}
 		} else {
 			logrus.Infoln("Cant't find gpu volume, maybe nvidia-docker hasn't been installed. ", err)

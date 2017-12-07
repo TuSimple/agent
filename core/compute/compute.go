@@ -21,12 +21,7 @@ import (
 	"sync"
 )
 
-var gpuDetection func(host model.Host, dockerClient *client.Client) int
 var gpuMu sync.Mutex
-
-func InitGPUReservation() {
-	gpuDetection = generateGpuDetection()
-}
 
 func DoInstanceActivate(instance model.Instance, host model.Host, progress *progress.Progress, dockerClient *client.Client, infoData model.InfoData) error {
 	start := time.Now()
@@ -68,11 +63,11 @@ func DoInstanceActivate(instance model.Instance, host model.Host, progress *prog
 	}
 
 	// add gpu support
-	if gpu := gpuDetection(host, dockerClient); gpu > 0 {
-		if gpuNeed, gpuRatio := getGpuNeeded(instance); gpuNeed > 0 {
+	if gpu := gpuDetection(host); gpu > 0 {
+		if gpuNeed, gpuRatio, strategy := getGpuNeeded(instance); gpuNeed > 0 {
 			gpuMu.Lock()
 			gpuAllocated := getGpuAllocated(dockerClient, gpu)
-			gpuDispatched := dispatchGpu(gpuAllocated, &config, gpuNeed, gpuRatio)
+			gpuDispatched := dispatchGpu(gpuAllocated, &config, gpuNeed, gpuRatio, strategy)
 			setGpuDeviceAndVolume(gpuDispatched, &instance, dockerClient)
 			defer gpuMu.Unlock()
 		}

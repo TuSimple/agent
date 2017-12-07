@@ -14,7 +14,6 @@ import (
 
 	_ "github.com/rancher/agent/cloudprovider/aliyun"
 	_ "github.com/rancher/agent/cloudprovider/aws"
-	"github.com/rancher/agent/core/compute"
 )
 
 var (
@@ -57,8 +56,6 @@ func main() {
 	accessKey := os.Getenv("CATTLE_ACCESS_KEY")
 	secretKey := os.Getenv("CATTLE_SECRET_KEY")
 	workerCount := 250
-
-	compute.InitGPUReservation()
 
 	if config.DetectCloudProvider() {
 		logrus.Info("Detecting cloud provider")
